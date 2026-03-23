@@ -1,0 +1,91 @@
+# DebtQuest — Cursor Project Context
+
+## What This Is
+A fully built, build-verified Vite + React PWA — a gamified debt payoff tracker for two people (husband & wife). The entire app is complete and builds clean. Your job is to help deploy it and iterate on it.
+
+## Project Structure
+```
+debtquest/
+├── index.html              # Vite entry with PWA meta tags
+├── package.json            # React 18, Dexie.js, Recharts, vite-plugin-pwa
+├── vite.config.js          # Vite + PWA manifest (standalone, portrait, dark theme)
+├── vercel.json             # SPA rewrite rules
+├── .gitignore
+├── README.md
+├── public/
+│   ├── favicon.svg
+│   ├── apple-touch-icon.png
+│   ├── pwa-192x192.png
+│   └── pwa-512x512.png
+└── src/
+    ├── main.jsx            # React root mount
+    ├── index.css           # Global styles, Outfit + Syne fonts, dark theme reset
+    ├── db.js               # Dexie.js IndexedDB layer — all persistence lives here
+    └── App.jsx             # Full app (~1,770 lines, all screens + logic)
+```
+
+## Tech Stack
+- **React 18** — functional components, hooks only
+- **Vite 6** — dev server + build
+- **Dexie.js 4** — IndexedDB wrapper for on-device persistence
+- **Recharts** — area charts + line charts for payoff projections
+- **vite-plugin-pwa** — service worker, manifest, offline support
+- **Vercel** — deploy target (free tier)
+- **No backend** — fully client-side, all data in IndexedDB
+
+## Deploy Steps (do these in order)
+```bash
+npm install
+npm run dev          # verify at localhost:5173
+npm i -g vercel      # if not installed
+vercel               # follow prompts, deploy
+```
+After deploy: open the Vercel URL in Safari on iPhone → Share → Add to Home Screen.
+
+## App Architecture
+
+### Data Model (in db.js)
+- `appState` — single row: xp, streak, lastPaymentMonth, achievements[], profile
+- `accounts` — id, name, type, originalBalance, currentBalance, interestRate, minimumPayment, dueDate, emoji, color, isPaidOff
+- `payments` — id, accountId, paymentDate, amountPaid, balanceBefore, balanceAfter, note
+- `rewards` — id, name, desc, emoji, cost, createdBy
+- `redeemedRewards` — id, rewardId, name, emoji, cost, date
+
+### Screens (all in App.jsx)
+1. **Dashboard** — total debt, progress ring, streak/XP/level, account cards
+2. **Account Detail** — balance, progress ring, payment history, log payment
+3. **Log Payment** → **Payment Success Screen** — projected payoff chart, pace tracker (months ahead of schedule), interest saved this payment, cumulative interest saved, XP earned, badge unlocks
+4. **Payoff Projections** — amortization engine, 3-scenario comparison (min / +$200 / +$500)
+5. **Rewards Shop** — XP-based reward redemption, custom rewards, redemption history
+6. **Achievements** — 9 badges, XP/level progression, all-time stats
+7. **Settings** — JSON export/import, account management, data reset
+
+### Gamification System
+- XP: 1 per $10 paid, 1.5x bonus for above-minimum, +500 for payoff, +200 per badge
+- Levels: Debt Rookie → Warrior → Slayer → Crusher → Debt Free Legend
+- Streaks: consecutive months with payments
+- Confetti on payoffs and badge unlocks
+- Victory celebration screen on final payoff (crown drop, battle report, shine effects)
+
+### Reward System
+- 8 preset rewards (500-5000 XP): Kitchen Duty Free, Couch Commander, Sleep In Pass, Dinner Date, Spa Day, Quality Time 🍆, No Chores Weekend, Treat Yourself
+- Custom reward creation with emoji picker
+- XP deducted on redeem, full history tracked
+
+## Design System
+- **Dark theme**: bg #0a0a0f, surface #13131a, border #2a2a3d
+- **Accent colors**: purple #7c6af7, gold #f7c26a, green #6af7b8, pink #f76a9b, blue #6ac4f7
+- **Fonts**: Outfit (body, all sizes), Syne (logo + headings only)
+- **Mobile-first**: max-width 480px, bottom tab nav, safe-area-inset padding
+
+## If Making Changes
+- All app logic is in `src/App.jsx` — it's a big file but well-commented with section headers
+- Data layer is isolated in `src/db.js` — Dexie handles all IndexedDB ops
+- The `save()` function in App.jsx is the single write path — all mutations go through it
+- To add a new screen: add component inside DebtQuest(), add to `screens` map, add NavIcon
+- The app was build-verified: `npx vite build` completes clean with PWA service worker
+
+## Future Upgrade Path
+- **Shared data (Supabase)**: Replace db.js with Supabase client, add auth, row-level security
+- **React Native**: Codebase is pure React + hooks, straightforward to port
+- **Notifications**: Add push via service worker for payment reminders
