@@ -1,8 +1,17 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, CartesianGrid } from "recharts";
-import { initDB, loadAllData, saveAllData } from "./db.js";
+import {
+  initDB,
+  loadAllData,
+  saveAllData,
+  isSupabaseConfigured,
+  signInWithPassword,
+  signUpWithPassword,
+  signOut,
+} from "./db.js";
+import { supabase } from "./supabaseClient.js";
 
-// ─── Persistence Layer: Dexie.js (IndexedDB) ───
+// ─── Persistence: IndexedDB (local) or Supabase (cloud) ───
 
 const DEFAULT_DATA = {
   accounts: [],
@@ -235,9 +244,113 @@ function Btn({ children, variant = "primary", ...props }) {
   );
 }
 
+function AuthScreen({ onToast }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const inputStyle = {
+    width: "100%",
+    padding: "12px 14px",
+    background: "#1c1c27",
+    border: "1px solid #2a2a3d",
+    borderRadius: 8,
+    color: "#e8e8f0",
+    fontSize: 15,
+    outline: "none",
+    fontFamily: "inherit",
+    marginBottom: 12,
+    boxSizing: "border-box",
+  };
+
+  const handleSignIn = async () => {
+    setErr(null);
+    if (!email.trim() || !password) {
+      setErr("Enter email and password");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await signInWithPassword(email.trim(), password);
+      if (error) setErr(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSignUp = async () => {
+    setErr(null);
+    if (!email.trim() || password.length < 6) {
+      setErr("Use a valid email and password (6+ characters)");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await signUpWithPassword(email.trim(), password);
+      if (error) setErr(error.message);
+      else onToast?.("Account created — you can sign in now.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#0a0a0f",
+      color: "#e8e8f0",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "stretch",
+      justifyContent: "center",
+      padding: 24,
+      maxWidth: 400,
+      margin: "0 auto",
+      boxSizing: "border-box",
+    }}>
+      <div style={{ textAlign: "center", marginBottom: 24 }}>
+        <div style={{ fontSize: 40, marginBottom: 8 }}>🎯</div>
+        <h1 style={{ fontFamily: "'Syne', sans-serif", fontSize: 24, margin: 0 }}>
+          Debt<span style={{ color: "#f7c26a" }}>Quest</span>
+        </h1>
+        <p style={{ color: "#6b6b8a", fontSize: 13, marginTop: 8, lineHeight: 1.4 }}>
+          Sign in to sync data in the cloud (same login on phone and desktop).
+        </p>
+      </div>
+      {err && (
+        <div style={{ color: "#f76a6a", fontSize: 13, marginBottom: 12, textAlign: "center" }}>{err}</div>
+      )}
+      <input
+        type="email"
+        placeholder="Email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        autoComplete="email"
+        style={inputStyle}
+      />
+      <input
+        type="password"
+        placeholder="Password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        autoComplete="current-password"
+        style={inputStyle}
+      />
+      <Btn variant="gold" onClick={handleSignIn} style={{ marginBottom: 10 }} disabled={busy}>
+        {busy ? "…" : "Sign in"}
+      </Btn>
+      <Btn variant="ghost" onClick={handleSignUp} disabled={busy}>
+        {busy ? "…" : "Create account"}
+      </Btn>
+    </div>
+  );
+}
+
 // ─── MAIN APP ───
 export default function DebtQuest() {
   const [data, setData] = useState(null);
+  const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [authUser, setAuthUser] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [showAddAccount, setShowAddAccount] = useState(false);
@@ -248,21 +361,69 @@ export default function DebtQuest() {
   const [paymentSuccess, setPaymentSuccess] = useState(null);
   const [showAddReward, setShowAddReward] = useState(false);
 
-  // Load data from IndexedDB
+  // Load data: IndexedDB locally, or Supabase after auth
   useEffect(() => {
-    (async () => {
-      try {
-        await initDB();
-        const loaded = await loadAllData();
-        setData(loaded);
-      } catch (e) {
-        console.error("DB load failed:", e);
-        setData({ ...DEFAULT_DATA });
+    if (!isSupabaseConfigured) {
+      (async () => {
+        try {
+          await initDB();
+          const loaded = await loadAllData();
+          setData(loaded);
+        } catch (e) {
+          console.error("DB load failed:", e);
+          setData({ ...DEFAULT_DATA });
+        }
+      })();
+      return;
+    }
+
+    if (!supabase) {
+      setAuthReady(true);
+      return;
+    }
+
+    let mounted = true;
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!mounted) return;
+      setAuthUser(session?.user ?? null);
+      if (session?.user) {
+        try {
+          const loaded = await loadAllData();
+          setData(loaded);
+        } catch (e) {
+          console.error("DB load failed:", e);
+          setData({ ...DEFAULT_DATA });
+        }
+      } else {
+        setData(null);
       }
-    })();
+      setAuthReady(true);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return;
+      setAuthUser(session?.user ?? null);
+      if (session?.user) {
+        try {
+          const loaded = await loadAllData();
+          setData(loaded);
+        } catch (e) {
+          console.error("DB load failed:", e);
+          setData({ ...DEFAULT_DATA });
+        }
+      } else {
+        setData(null);
+      }
+      setAuthReady(true);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  // Save data to IndexedDB
+  // Persist data (IndexedDB or Supabase)
   const save = useCallback(async (newData) => {
     setData(newData);
     try {
@@ -527,6 +688,21 @@ export default function DebtQuest() {
     }
     return points;
   }, []);
+
+  if (isSupabaseConfigured && !authReady) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0a0a0f", color: "#f7c26a", fontSize: 24 }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🎯</div>
+          <div>Loading…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isSupabaseConfigured && !authUser) {
+    return <AuthScreen onToast={(msg) => showToast(msg)} />;
+  }
 
   if (!data) {
     return (
@@ -910,6 +1086,24 @@ export default function DebtQuest() {
     return (
       <div style={{ padding: "0 16px 100px" }}>
         <h2 style={{ fontSize: 18, fontWeight: 800, color: "#e8e8f0", marginBottom: 16 }}>Settings</h2>
+
+        {isSupabaseConfigured && (
+          <div style={{ background: "#13131a", border: "1px solid #2a2a3d", borderRadius: 14, padding: 16, marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#f7c26a", marginBottom: 12 }}>Cloud account</h3>
+            <p style={{ fontSize: 12, color: "#6b6b8a", marginBottom: 12, lineHeight: 1.45 }}>
+              Signed in as {authUser?.email || "user"}. Data syncs to Supabase.
+            </p>
+            <Btn
+              variant="ghost"
+              onClick={async () => {
+                await signOut();
+                showToast("Signed out");
+              }}
+            >
+              Sign out
+            </Btn>
+          </div>
+        )}
 
         <div style={{ background: "#13131a", border: "1px solid #2a2a3d", borderRadius: 14, padding: 16, marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: "#f7c26a", marginBottom: 12 }}>Data Management</h3>
