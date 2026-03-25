@@ -12,6 +12,9 @@ debtquest/
 ├── vercel.json             # SPA rewrite rules
 ├── .gitignore
 ├── README.md
+├── .env.example            # Supabase URL + key names (no secrets)
+├── supabase/
+│   └── schema.sql          # Run once in Supabase SQL Editor (table + RLS)
 ├── public/
 │   ├── favicon.svg
 │   ├── apple-touch-icon.png
@@ -27,11 +30,12 @@ debtquest/
 ## Tech Stack
 - **React 18** — functional components, hooks only
 - **Vite 6** — dev server + build
-- **Dexie.js 4** — IndexedDB wrapper for on-device persistence
+- **Dexie.js 4** — IndexedDB when Supabase env is not set (local-only mode)
+- **Supabase** — Postgres + auth; one JSON row per user in `debtquest_data` (`src/db.js`)
 - **Recharts** — area charts + line charts for payoff projections
 - **vite-plugin-pwa** — service worker, manifest, offline support
 - **Vercel** — deploy target (free tier)
-- **No backend** — fully client-side, all data in IndexedDB
+- **Client-only app** — no custom server; persistence is IndexedDB and/or Supabase from the browser
 
 ## Deploy Steps (do these in order)
 ```bash
@@ -80,12 +84,37 @@ After deploy: open the Vercel URL in Safari on iPhone → Share → Add to Home 
 
 ## If Making Changes
 - All app logic is in `src/App.jsx` — it's a big file but well-commented with section headers
-- Data layer is isolated in `src/db.js` — Dexie handles all IndexedDB ops
+- Data layer is isolated in `src/db.js` — Dexie (local) and/or Supabase (cloud); `src/supabaseClient.js` reads `VITE_*` env
 - The `save()` function in App.jsx is the single write path — all mutations go through it
 - To add a new screen: add component inside DebtQuest(), add to `screens` map, add NavIcon
 - The app was build-verified: `npx vite build` completes clean with PWA service worker
 
+## Backend & deploy agent (use this so you don’t re-explain infra)
+
+When the user asks about “backend,” env, Supabase, or Vercel, assume this project and follow this checklist:
+
+1. **Two persistence modes**
+   - **No** `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` → app uses **IndexedDB only** (Dexie).
+   - **Both** set → **email sign-in** + data in Supabase table `public.debtquest_data` (JSON payload, RLS per `auth.uid()`).
+
+2. **Env vars (names matter — Vite only exposes `VITE_*`)**
+   - `VITE_SUPABASE_URL` = `https://<project-ref>.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY` = Supabase **publishable** (or legacy anon) key from Project Settings → API
+
+3. **Supabase setup (once per project)**
+   - Run `supabase/schema.sql` in **SQL Editor** (creates table + RLS).
+   - **Authentication → Email** enabled; optional “confirm email” off for quick testing.
+
+4. **Vercel**
+   - Add the **same** `VITE_*` variables under Project → Settings → Environment Variables.
+   - Redeploy after changing env vars (build bakes client env at build time).
+
+5. **Secrets**
+   - `.env` is gitignored — **never** commit keys. If a key is leaked in chat, suggest rotating it in Supabase.
+
+6. **Household**
+   - One shared **email/password** = one dataset (couple uses one login unless you add multi-user schema later).
+
 ## Future Upgrade Path
-- **Shared data (Supabase)**: Replace db.js with Supabase client, add auth, row-level security
 - **React Native**: Codebase is pure React + hooks, straightforward to port
 - **Notifications**: Add push via service worker for payment reminders
